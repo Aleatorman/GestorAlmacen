@@ -10,7 +10,6 @@ def generar_pdf_picking(nombre_sucursal, encontrados, no_detectados, alertas):
     """
     Genera un PDF de picking optimizado con sección de firmas en cada hoja.
     """
-    # 1. Crear directorios
     ahora = datetime.now()
     anio = ahora.strftime("%Y")
     mes = ahora.strftime("%m")
@@ -20,42 +19,31 @@ def generar_pdf_picking(nombre_sucursal, encontrados, no_detectados, alertas):
     os.makedirs(directorio, exist_ok=True)
     ruta_pdf = os.path.abspath(os.path.join(directorio, f"{fecha_hora}_{nombre_sucursal.replace(' ', '_')}.pdf"))
     
-    # 2. Configurar el documento (Aumentamos bottomMargin para las firmas)
     doc = SimpleDocTemplate(
         ruta_pdf, 
         pagesize=letter, 
         rightMargin=20, 
         leftMargin=20, 
         topMargin=20, 
-        bottomMargin=80 # Espacio reservado para las firmas
+        bottomMargin=80
     )
     elementos = []
     estilos = getSampleStyleSheet()
     
-    # Estilos compactos
     estilo_titulo = ParagraphStyle('Titulo', parent=estilos['Heading2'], fontSize=12, spaceAfter=5)
     estilo_seccion = ParagraphStyle('Seccion', parent=estilos['Heading3'], fontSize=11, spaceAfter=2, spaceBefore=8)
 
-    # 3. Función para dibujar las firmas en cada página
     def dibujar_firmas(canvas, doc):
         canvas.saveState()
-        # Dibujamos las líneas de firma a 0.5 pulgadas del fondo
         ancho, alto = letter
-        
-        # Línea Chofer
         canvas.line(1 * inch, 0.7 * inch, 3.5 * inch, 0.7 * inch)
         canvas.setFont("Helvetica", 9)
         canvas.drawCentredString(2.25 * inch, 0.55 * inch, "Firma Chofer (Entrega)")
-        
-        # Línea Responsable
         canvas.line(5 * inch, 0.7 * inch, 7.5 * inch, 0.7 * inch)
         canvas.drawCentredString(6.25 * inch, 0.55 * inch, "Firma Responsable Sucursal (Recibe)")
-        
-        # Número de página (opcional, ayuda al orden)
         canvas.drawRightString(ancho - 20, 20, f"Página {doc.page}")
         canvas.restoreState()
 
-    # 4. Encabezado compacto
     fecha_str = ahora.strftime('%d/%m/%Y %H:%M')
     datos_header = [[
         Paragraph(f"<b>Orden Surtido - {nombre_sucursal}</b>", estilo_titulo), 
@@ -66,7 +54,6 @@ def generar_pdf_picking(nombre_sucursal, encontrados, no_detectados, alertas):
     elementos.append(tabla_header)
     elementos.append(Spacer(1, 5))
 
-    # --- FUNCIÓN PARA CREAR TABLAS ---
     def crear_tabla_productos(lista_productos):
         datos_tabla = [['[  ]', 'CÓDIGO', 'DESCRIPCIÓN', 'CANT.', 'GRUPO']]
         for p in lista_productos:
@@ -86,7 +73,6 @@ def generar_pdf_picking(nombre_sucursal, encontrados, no_detectados, alertas):
         ]))
         return tabla
 
-    # 5. Listado de productos
     if encontrados:
         prod_abajo = [p for p in encontrados if p['ubicacion'] == 'ABAJO']
         prod_arriba = [p for p in encontrados if p['ubicacion'] == 'ARRIBA']
@@ -102,7 +88,6 @@ def generar_pdf_picking(nombre_sucursal, encontrados, no_detectados, alertas):
             elementos.append(Paragraph("<b>📍 UBICACIÓN: ARRIBA</b>", estilo_seccion))
             elementos.append(crear_tabla_productos(prod_arriba))
 
-    # 6. No detectados
     if no_detectados:
         elementos.append(Spacer(1, 10))
         titulo_no_det = "<b>❌ NO ENCONTRADOS EN CATÁLOGO</b> <font size=8 color='#555555'>(errores de captura o nombre)</font>"
@@ -120,6 +105,33 @@ def generar_pdf_picking(nombre_sucursal, encontrados, no_detectados, alertas):
         ]))
         elementos.append(tabla_nd)
 
-    # 7. Generar PDF usando el callback para las firmas
     doc.build(elementos, onFirstPage=dibujar_firmas, onLaterPages=dibujar_firmas)
     return ruta_pdf
+
+# MODIFICACIÓN: Nueva función para generar TXT en vez del cuadro de advertencia
+def generar_txt_alertas(ruta_pdf, alertas, sucursal):
+    """
+    Crea un archivo .txt con las alertas de stock insuficiente en la misma carpeta del PDF.
+    """
+    if not alertas:
+        return None
+    
+    ruta_txt = ruta_pdf.replace(".pdf", "_ALERTAS.txt")
+    try:
+        with open(ruta_txt, "w", encoding="utf-8") as f:
+            f.write(f"=== REPORTE DE ALERTAS DE STOCK INSUFICIENTE ===\n")
+            f.write(f"Sucursal: {sucursal}\n")
+            f.write(f"Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n")
+            f.write("="*50 + "\n\n")
+            f.write("Los siguientes productos solicitados superan la existencia actual en catálogo:\n\n")
+            
+            for a in alertas:
+                f.write(f"• [Código: {a['codigo']}] {a['descripcion']}\n")
+                f.write(f"  -> Solicitado por tienda : {a['cantidad']} unidades\n")
+                f.write(f"  -> Existencia en sistema : {a['existencia']} unidades\n")
+                f.write(f"  -> Faltante estimado     : {a['cantidad'] - a['existencia']} unidades\n")
+                f.write("-" * 40 + "\n")
+        return ruta_txt
+    except Exception as e:
+        print(f"Error generando archivo TXT de alertas: {e}")
+        return None

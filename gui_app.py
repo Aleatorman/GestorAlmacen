@@ -10,6 +10,57 @@ import db_manager
 import excel_processor
 import pdf_generator
 
+# NUEVA CLASE: Ventana modal para configurar exclusivamente productos nuevos detectados
+class DialogConfigurarNuevos(QDialog):
+    def __init__(self, nuevos_productos, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("⚙️ Configuración Rápida - Productos Nuevos Detectados")
+        self.resize(750, 450)
+        self.nuevos_productos = nuevos_productos
+        
+        layout = QVBoxLayout(self)
+        info_lbl = QLabel(
+            f"<b>Se detectaron {len(nuevos_productos)} productos nuevos</b> que no existían en la base de datos.<br>"
+            "Por defecto se han asignado a <b>ABAJO</b>. Si alguno va <b>ARRIBA</b>, cámbialo aquí directamente:"
+        )
+        layout.addWidget(info_lbl)
+        layout.addSpacing(10)
+        
+        self.tabla = QTableWidget()
+        self.tabla.setColumnCount(4)
+        self.tabla.setHorizontalHeaderLabels(["Código", "Descripción", "Grupo / Categoría", "Ubicación en Almacén"])
+        self.tabla.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        layout.addWidget(self.tabla)
+        
+        self.cargar_tabla()
+        
+        btn_listo = QPushButton("✅ Guardar Ubicaciones y Terminar")
+        btn_listo.setStyleSheet("background-color: #28B463; color: white; font-weight: bold; padding: 10px; font-size: 14px;")
+        btn_listo.clicked.connect(self.accept)
+        layout.addWidget(btn_listo)
+
+    def cargar_tabla(self):
+        self.tabla.setRowCount(0)
+        for fila, (cod, desc, cat) in enumerate(self.nuevos_productos):
+            self.tabla.insertRow(fila)
+            item_cod = QTableWidgetItem(cod)
+            item_cod.setFlags(item_cod.flags() & ~Qt.ItemIsEditable)
+            self.tabla.setItem(fila, 0, item_cod)
+            
+            item_desc = QTableWidgetItem(desc)
+            item_desc.setFlags(item_desc.flags() & ~Qt.ItemIsEditable)
+            self.tabla.setItem(fila, 1, item_desc)
+            
+            item_cat = QTableWidgetItem(cat)
+            item_cat.setFlags(item_cat.flags() & ~Qt.ItemIsEditable)
+            self.tabla.setItem(fila, 2, item_cat)
+            
+            combo_ubi = QComboBox()
+            combo_ubi.addItems(["ABAJO", "ARRIBA"])
+            combo_ubi.setCurrentText("ABAJO")  # Por defecto ABAJO
+            combo_ubi.currentTextChanged.connect(lambda texto, c=cod: db_manager.set_ubicacion_producto(c, texto))
+            self.tabla.setCellWidget(fila, 3, combo_ubi)
+
 class DialogSucursales(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -103,7 +154,7 @@ class DialogUbicaciones(QDialog):
             self.tabla.setItem(fila, 1, item_desc)
             
             combo_ubi = QComboBox()
-            combo_ubi.addItems(["ARRIBA", "ABAJO"])
+            combo_ubi.addItems(["ABAJO", "ARRIBA"])  # MODIFICADO: Orden default ABAJO primero
             combo_ubi.setCurrentText(prod[2])
             combo_ubi.currentTextChanged.connect(lambda texto, cod=prod[0]: db_manager.set_ubicacion_producto(cod, texto))
             self.tabla.setCellWidget(fila, 2, combo_ubi)
@@ -119,7 +170,7 @@ class DialogUbicaciones(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Sistema de Gestión de Pedidos Almacén v1.0")
+        self.setWindowTitle("Sistema de Gestión de Pedidos Almacén v1.1")
         self.resize(900, 650)
         self.ruta_excel_actual = ""
         
@@ -179,10 +230,10 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(self.tab_catalogo)
         instrucciones = QLabel(
             "<b>INSTRUCCIONES:</b><br>"
-            "1. Abre tu archivo 'BASE DE DATOS.xlsx'.<br>"
-            "2. Selecciona toda la tabla (incluyendo encabezados).<br>"
+            "1. Abre el SRV y ve a PRODUCTOS'.<br>"
+            "2. Selecciona toda la tabla.<br>"
             "3. Presiona <b>Ctrl+C</b> para copiar.<br>"
-            "4. Presiona el botón verde de abajo."
+            "4. Presiona el botón de abajo."
         )
         instrucciones.setStyleSheet("font-size: 14px;")
         layout.addWidget(instrucciones)
@@ -236,6 +287,7 @@ class MainWindow(QMainWindow):
         btn_buscar.clicked.connect(self.buscar_historial)
         fila_filtros.addWidget(btn_buscar)
         layout.addLayout(fila_filtros)
+        
         self.tabla_historial = QTableWidget()
         self.tabla_historial.setColumnCount(8)
         self.tabla_historial.setHorizontalHeaderLabels([
@@ -248,10 +300,20 @@ class MainWindow(QMainWindow):
         self.tabla_historial.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.tabla_historial.setEditTriggers(QAbstractItemView.NoEditTriggers)
         layout.addWidget(self.tabla_historial)
-        btn_abrir_pdf = QPushButton("📄 Abrir PDF del Pedido Seleccionado")
+        
+        # MODIFICACIÓN: Dos botones abajo (PDF y TXT Alertas)
+        fila_botones_historial = QHBoxLayout()
+        btn_abrir_pdf = QPushButton("📄 Abrir PDF de Pedido")
         btn_abrir_pdf.setStyleSheet("background-color: #2E86C1; color: white; font-weight: bold; padding: 12px; font-size: 14px;")
         btn_abrir_pdf.clicked.connect(self.abrir_pdf_historial)
-        layout.addWidget(btn_abrir_pdf)
+        
+        btn_abrir_txt = QPushButton("⚠️ Ver Alertas TXT")
+        btn_abrir_txt.setStyleSheet("background-color: #F39C12; color: white; font-weight: bold; padding: 12px; font-size: 14px;")
+        btn_abrir_txt.clicked.connect(self.abrir_txt_historial)
+        
+        fila_botones_historial.addWidget(btn_abrir_pdf)
+        fila_botones_historial.addWidget(btn_abrir_txt)
+        layout.addLayout(fila_botones_historial)
 
     def al_cambiar_pestana(self, index):
         if index == 0: self.cargar_sucursales_combo()
@@ -270,13 +332,31 @@ class MainWindow(QMainWindow):
         for suc in sucursales: self.combo_filtro_suc.addItem(suc[1], userData=suc[0])
 
     def procesar_portapapeles(self):
-        self.log_procesar.append("Leyendo portapapeles...")
+        self.log_catalogo.append("Leyendo portapapeles...")
         exito, resultado = excel_processor.leer_catalogo_portapapeles()
         if not exito:
             QMessageBox.critical(self, "Error", resultado)
             return
-        if db_manager.upsert_catalogo(resultado):
-            QMessageBox.information(self, "Éxito", "Catálogo actualizado.")
+        
+        # MODIFICACIÓN: upsert_catalogo ahora devuelve exito y la lista de nuevos productos
+        exito_bd, nuevos_productos = db_manager.upsert_catalogo(resultado)
+        if exito_bd:
+            self.log_catalogo.append(f"✅ Catálogo guardado en BD con éxito. ({len(resultado)} filas procesadas)")
+            
+            # Si se encontraron productos nuevos, preguntamos al usuario si desea configurarlos
+            if nuevos_productos:
+                resp = QMessageBox.question(
+                    self, 
+                    "🆕 Productos Nuevos Detectados", 
+                    f"Se han registrado {len(nuevos_productos)} productos nuevos en el catálogo.\n\n"
+                    "Por defecto se enviaron al almacén 'ABAJO'. ¿Deseas revisar si alguno va ARRIBA ahora mismo?",
+                    QMessageBox.Yes | QMessageBox.No
+                )
+                if resp == QMessageBox.Yes:
+                    dialogo = DialogConfigurarNuevos(nuevos_productos, self)
+                    dialogo.exec()
+            else:
+                QMessageBox.information(self, "Éxito", "Catálogo actualizado sin productos nuevos detectados.")
         else:
             QMessageBox.critical(self, "Error", "Fallo al guardar BD.")
 
@@ -303,26 +383,29 @@ class MainWindow(QMainWindow):
             
         self.log_procesar.append(f"✅ Encontrados: {len(encontrados)} | ❌ No detectados: {len(no_detectados)} | ⚠️ Alertas: {len(alertas)}")
         
-        # MOSTRAR ALERTA DETALLADA
-        if alertas:
-            msj_alerta = "⚠️ <b>ALERTA DE STOCK INSUFICIENTE</b> ⚠️<br><br>"
-            msj_alerta += "Los siguientes productos superan la existencia actual:<br><br>"
-            for a in alertas:
-                msj_alerta += f"• {a['descripcion']} (Pide: {a['cantidad']}, Hay: {a['existencia']})<br>"
-            
-            msg_box = QMessageBox(self)
-            msg_box.setIcon(QMessageBox.Warning)
-            msg_box.setWindowTitle("Alerta de Resurtido")
-            msg_box.setText(msj_alerta)
-            msg_box.exec()
-        
         try:
+            # Generamos el PDF
             ruta_pdf = pdf_generator.generar_pdf_picking(sucursal, encontrados, no_detectados, alertas)
+            
+            # MODIFICACIÓN: Si hay alertas, generamos el archivo TXT silencioso sin cuadro intrusivo
+            ruta_txt_alertas = None
+            if alertas:
+                ruta_txt_alertas = pdf_generator.generar_txt_alertas(ruta_pdf, alertas, sucursal)
+                self.log_procesar.append(f"⚠️ Se generó archivo de alertas TXT: {os.path.basename(ruta_txt_alertas)}")
+
             nombre_archivo = os.path.basename(self.ruta_excel_actual)
             total_pedidos = len(encontrados) + len(no_detectados)
             db_manager.guardar_historial_pedido(id_sucursal, nombre_archivo, ruta_pdf, total_pedidos, len(no_detectados), len(alertas))
+            
             os.startfile(ruta_pdf)
-            QMessageBox.information(self, "Terminado", "¡PDF generado con éxito y guardado en histórico!")
+            
+            # Mensaje final agradable indicando si hubo alertas
+            msj_final = "¡PDF de surtido generado y guardado en el histórico con éxito!"
+            if alertas:
+                msj_final += f"\n\n⚠️ NOTA: Se detectaron {len(alertas)} productos con stock insuficiente. Se creó un archivo TXT en la misma carpeta del PDF para su revisión."
+            
+            QMessageBox.information(self, "Terminado", msj_final)
+            
         except Exception as e:
             QMessageBox.critical(self, "Error PDF", f"Error: {str(e)}")
 
@@ -340,7 +423,24 @@ class MainWindow(QMainWindow):
 
     def abrir_pdf_historial(self):
         fila = self.tabla_historial.currentRow()
-        if fila < 0: return QMessageBox.warning(self, "Atención", "Selecciona un pedido.")
+        if fila < 0: return QMessageBox.warning(self, "Atención", "Selecciona un pedido de la tabla.")
         ruta_pdf = self.tabla_historial.item(fila, 7).text()
         if os.path.exists(ruta_pdf): os.startfile(ruta_pdf)
-        else: QMessageBox.critical(self, "Error", "Archivo no encontrado.")
+        else: QMessageBox.critical(self, "Error", "Archivo PDF no encontrado en el disco.")
+
+    # MODIFICACIÓN: Función para abrir el TXT de alertas desde la tabla de historial
+    def abrir_txt_historial(self):
+        fila = self.tabla_historial.currentRow()
+        if fila < 0: return QMessageBox.warning(self, "Atención", "Selecciona un pedido de la tabla.")
+        
+        alertas_num = int(self.tabla_historial.item(fila, 6).text())
+        if alertas_num == 0:
+            return QMessageBox.information(self, "Sin Alertas", "Este pedido no registró alertas de stock insuficiente.")
+            
+        ruta_pdf = self.tabla_historial.item(fila, 7).text()
+        ruta_txt = ruta_pdf.replace(".pdf", "_ALERTAS.txt")
+        
+        if os.path.exists(ruta_txt):
+            os.startfile(ruta_txt)
+        else:
+            QMessageBox.warning(self, "Aviso", "El archivo PDF original se generó sin archivo TXT adjunto o fue eliminado del disco.")

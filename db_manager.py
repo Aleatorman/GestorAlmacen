@@ -21,10 +21,11 @@ def inicializar_bd():
                     codigo TEXT PRIMARY KEY, descripcion TEXT NOT NULL,
                     categoria TEXT NOT NULL, existencia INTEGER NOT NULL DEFAULT 0,
                     fecha_actualizacion TEXT NOT NULL)''')
+            # MODIFICACIÓN: Ubicación por defecto ahora es 'ABAJO'
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS ubicaciones (
                     codigo_producto TEXT PRIMARY KEY,
-                    ubicacion TEXT NOT NULL CHECK(ubicacion IN ('ARRIBA','ABAJO')) DEFAULT 'ARRIBA')''')
+                    ubicacion TEXT NOT NULL CHECK(ubicacion IN ('ARRIBA','ABAJO')) DEFAULT 'ABAJO')''')
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS sucursales (
                     id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT UNIQUE NOT NULL,
@@ -43,16 +44,29 @@ def inicializar_bd():
         raise
 
 def upsert_catalogo(df_catalogo):
+    """
+    Actualiza el catálogo y devuelve una lista de productos NUEVOS (que no existían en BD).
+    """
     fecha_hoy = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    nuevos_productos = []
     try:
         with get_connection() as conn:
             cursor = conn.cursor()
+            # 1. Consultar códigos existentes actualmente en BD
+            cursor.execute('SELECT codigo FROM productos')
+            codigos_existentes = set(row[0] for row in cursor.fetchall())
+            
+            # 2. Procesar e insertar / actualizar
             for index, row in df_catalogo.iterrows():
                 codigo = str(row['Código 1']).strip()
                 descripcion = str(row['Nombre']).strip()
                 categoria = str(row['Grupo']).strip()
                 try: existencia = int(float(row['Existencia']))
                 except (ValueError, TypeError): existencia = 0
+
+                # Si no existía, lo registramos en la lista de nuevos para avisar
+                if codigo not in codigos_existentes:
+                    nuevos_productos.append((codigo, descripcion, categoria))
 
                 cursor.execute('''
                     INSERT INTO productos (codigo, descripcion, categoria, existencia, fecha_actualizacion)
@@ -62,10 +76,10 @@ def upsert_catalogo(df_catalogo):
                         existencia=excluded.existencia, fecha_actualizacion=excluded.fecha_actualizacion
                 ''', (codigo, descripcion, categoria, existencia, fecha_hoy))
             conn.commit()
-            return True
+            return True, nuevos_productos
     except Exception as e:
         logging.error(f"Error en upsert_catalogo: {e}")
-        return False
+        return False, []
 
 def procesar_pedido_contra_bd(df_pedido):
     encontrados = []
@@ -79,8 +93,9 @@ def procesar_pedido_contra_bd(df_pedido):
                 desc_excel = str(row['Nombre']).strip()
                 cantidad = int(row['Cantidad'])
                 
+                # MODIFICACIÓN: Si no tiene ubicación asignada, por defecto es 'ABAJO'
                 cursor.execute('''
-                    SELECT p.descripcion, p.categoria, p.existencia, COALESCE(u.ubicacion, 'ARRIBA') as ubicacion 
+                    SELECT p.descripcion, p.categoria, p.existencia, COALESCE(u.ubicacion, 'ABAJO') as ubicacion 
                     FROM productos p 
                     LEFT JOIN ubicaciones u ON p.codigo = u.codigo_producto 
                     WHERE p.codigo = ?
@@ -113,8 +128,9 @@ def get_productos_por_categoria(categoria):
     try:
         with get_connection() as conn:
             cursor = conn.cursor()
+            # MODIFICACIÓN: Fallback a 'ABAJO'
             cursor.execute('''
-                SELECT p.codigo, p.descripcion, COALESCE(u.ubicacion, 'ARRIBA')
+                SELECT p.codigo, p.descripcion, COALESCE(u.ubicacion, 'ABAJO')
                 FROM productos p
                 LEFT JOIN ubicaciones u ON p.codigo = u.codigo_producto
                 WHERE p.categoria = ?
@@ -188,8 +204,6 @@ def toggle_sucursal(id_sucursal, estado_actual):
     except Exception as e:
         return False
 
-# --- NUEVAS FUNCIONES PARA HISTÓRICO ---
-
 def guardar_historial_pedido(id_sucursal, nombre_archivo, ruta_pdf, tot_solicitados, tot_no_detectados, tot_alertas):
     fecha_hoy = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     try:
@@ -220,11 +234,9 @@ def obtener_historial_pedidos(fecha_inicio, fecha_fin, id_sucursal=None):
                 WHERE date(h.fecha_proceso) BETWEEN ? AND ?
             '''
             params = [fecha_inicio, fecha_fin]
-            
             if id_sucursal:
                 query += ' AND h.id_sucursal = ?'
                 params.append(id_sucursal)
-                
             query += ' ORDER BY h.fecha_proceso DESC'
             cursor.execute(query, params)
             return cursor.fetchall()
